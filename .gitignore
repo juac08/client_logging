@@ -1,0 +1,3 @@
+node_modules/
+**/dev-server/telemetry.jsonl
+.DS_Store

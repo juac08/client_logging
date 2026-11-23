@@ -1,0 +1,12 @@
+{
+  "name": "logging-poc-dev-server",
+  "private": true,
+  "type": "module",
+  "description": "Fake API + fake Azure Application Insights collector for the logging POC. No dependencies.",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
