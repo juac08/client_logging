@@ -1,0 +1,25 @@
+server:
+  port: 8080
+
+telemetry:
+  enabled: true
+  max-entries-per-batch: 50
+  max-body-bytes: 32768
+  batches-per-minute-per-session: 30
+  batches-per-minute-per-ip: 300
+
+logging:
+  pattern:
+    # %X prints the MDC, so you can see the client.* fields in the terminal
+    console: "%d{HH:mm:ss.SSS} %5p %-17logger{0} : %m  %X%n"
+
+---
+# Run with --spring.profiles.active=json to see the JSON your log pipeline would ship
+spring:
+  config:
+    activate:
+      on-profile: json
+logging:
+  structured:
+    format:
+      console: ecs

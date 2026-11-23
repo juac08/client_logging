@@ -1,24 +1,27 @@
 # React Native Client-Side Logging POCs
 
-Two runnable proofs of concept for client-side logging in a React Native app that
+Three runnable proofs of concept for client-side logging in a React Native app that
 uses RTK Query with a custom base query.
 
-Both share the same design:
+All three share the same design:
 - a framework-free logger with a privacy filter
 - a wrapper around the RTK Query base query
 - a class error boundary
 - a Playground screen with one button per failure scenario
 
-Only the monitoring layer differs between them.
+Only the destination of the events differs.
 
 | Folder | Sends to | Highlights |
 |---|---|---|
-| [`azure-poc/`](azure-poc/README.md) | Azure Application Insights | Runs fully locally with a fake Azure collector. Switch to real Azure by changing the connection string. |
+| [`backend-relay-poc/`](backend-relay-poc/README.md) | **Your own Spring Boot backend**, then your existing logs | No vendor SDK in the app, a server-side allowlist, and your own auth and rate limits. The bank-friendly option. |
+| [`azure-poc/`](azure-poc/README.md) | Azure Application Insights, directly from the app | Runs fully locally with a fake Azure collector. Switch to real Azure by changing the connection string. |
 | [`sentry-poc/`](sentry-poc/README.md) | Sentry (sentry.io) | Stack traces with redacted messages, native crash reports, issue grouping, breadcrumbs |
 | [`docs/`](docs/rn-logging-poc-guide.pdf) | n/a | Step-by-step implementation guide (PDF) |
 
-Both can be tested at no cost. The Azure POC needs no account for local testing,
-and Sentry's free Developer plan is enough for the Sentry POC.
+All three can be tested at no cost:
+- **backend-relay-poc** runs entirely on your machine.
+- **azure-poc** needs no account for local testing.
+- **sentry-poc** works on Sentry's free Developer plan.
 
 Each folder has its own README with:
 - setup steps
