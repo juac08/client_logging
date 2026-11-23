@@ -13,8 +13,8 @@ import {
   type HttpTransport,
   type Transport,
 } from '@your-org/common';
-import { tokenStore } from '../auth/tokenStore'; // your existing token source
 import { loggingConfig } from './config';
+import { createLogSender } from './logSender';
 import { installGlobalErrorHandlers } from './globalErrorHandlers';
 
 let http: HttpTransport | undefined;
@@ -25,35 +25,33 @@ export function initMonitoring(): void {
   started = true;
 
   try {
+    const { profile, environment } = loggingConfig; // dev / st / pt / pr: see profiles.ts
     const transports: Transport[] = [];
     if (__DEV__) transports.push(createConsoleTransport());
 
-    if (loggingConfig.url && (!__DEV__ || loggingConfig.sendInDev)) {
+    if (profile.sendToBackend) {
       http = createHttpTransport({
-        url: loggingConfig.url,
+        send: createLogSender(), // fetch now; the generated RTK endpoint later (logSender.ts)
         meta: {
           appVersion: loggingConfig.appVersion,
           buildNumber: String(loggingConfig.buildNumber),
-          environment: loggingConfig.environment,
+          environment,
           platform: Platform.OS,
           osVersion: String(Platform.Version),
           sessionId: newSessionId(), // per launch; not a user or device ID
         },
-        getHeaders: async (): Promise<Record<string, string>> => {
-          const token = await tokenStore.getAccessToken().catch(() => undefined);
-          return token ? { Authorization: `Bearer ${token}` } : {};
-        },
         // storage: mmkvQueueStorage,  // optional: keep unsent logs across restarts (see README)
-        flushIntervalMs: __DEV__ ? 3_000 : 15_000,
+        flushIntervalMs: profile.flushIntervalMs,
       });
       transports.push(http);
     }
 
     configureLogger({
       transports,
-      minLevel: __DEV__ ? 'debug' : 'info',
+      minLevel: profile.minLevel,
+      sampleRates: profile.sampleRates,
+      maxPerEventPerMinute: profile.maxPerEventPerMinute,
       devWarnings: __DEV__,
-      sampleRates: { 'screen.viewed': 1 }, // lower this if screen views get too chatty
     });
 
     let current = AppState.currentState;

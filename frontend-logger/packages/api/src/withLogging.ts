@@ -13,6 +13,11 @@ import { logger as rootLogger, type Logger, type LogLevel } from '@your-org/comm
 
 export type WithLoggingOptions = {
   slowMs?: number;
+  /**
+   * Endpoints that are never logged. ALWAYS include the log endpoint itself: otherwise
+   * a failing log request logs a failure, which is sent and fails again, in a loop.
+   */
+  ignoreEndpoints?: string[];
   logger?: Logger;
   /** Override if your customBaseQuery returns errors in its own shape. */
   classify?: (error: unknown) => { level: Extract<LogLevel, 'warn' | 'error'>; errorCode: string; status?: string | number };
@@ -35,9 +40,11 @@ export function classifyRtkError(error: unknown) {
 
 export function withLogging<Args, Result, Err, Extra, Meta>(
   baseQuery: BaseQueryFn<Args, Result, Err, Extra, Meta>,
-  { slowMs = 2000, logger = rootLogger, classify = classifyRtkError, now = Date.now }: WithLoggingOptions = {},
+  { slowMs = 2000, ignoreEndpoints = [], logger = rootLogger, classify = classifyRtkError, now = Date.now }: WithLoggingOptions = {},
 ): BaseQueryFn<Args, Result, Err, Extra, Meta> {
+  const ignored = new Set(ignoreEndpoints);
   return async (args, api, extraOptions) => {
+    if (ignored.has(api.endpoint)) return baseQuery(args, api, extraOptions);
     const start = now();
     const base = { endpoint: api.endpoint, operation: api.type };
     try {

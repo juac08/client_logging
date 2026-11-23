@@ -7,6 +7,9 @@ export { sanitizeContext, errorNameOf } from './sanitize';
 export { createConsoleTransport } from './transports/consoleTransport';
 export {
   createHttpTransport,
+  createFetchSender,
+  type LogSender,
+  type SendResult,
   type HttpTransport,
   type HttpTransportOptions,
   type HttpResult,

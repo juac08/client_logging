@@ -1,17 +1,22 @@
 /**
- * Sends log entries to your backend endpoint. Plain `fetch`, no dependencies.
+ * Queues log entries and delivers them to your backend in batches.
  *
- *  - Batches: sends every `flushIntervalMs`, as soon as `maxBatch` entries are queued,
- *    or on flush() (call it when the app goes to the background).
+ * HOW a batch is sent is pluggable (`send`):
+ *  - `createFetchSender(url, getHeaders)`: plain fetch, before the backend's generated
+ *    API exists.
+ *  - Your generated RTK Query endpoint (see packages/app/src/monitoring/rtkLogSender.ts):
+ *    reuses your base query, so auth and token refresh come for free.
+ *
+ * Delivery rules (the same for any sender):
+ *  - Sends every `flushIntervalMs`, as soon as `maxBatch` entries are queued, or on
+ *    flush() (when the app goes to the background).
  *  - 2xx: delivered.
  *  - 408, 429, 5xx, or no network: keeps the batch and retries with exponential
- *    backoff and jitter (honouring Retry-After on 429).
- *  - Any other 4xx: the server refused the batch on purpose, so it is dropped
- *    (never retried forever).
+ *    backoff and jitter (honouring Retry-After when the sender reports it).
+ *  - Any other 4xx: the server refused the batch on purpose, so it is dropped.
  *  - Bounded queue (`maxQueue`): the oldest entries are dropped first.
  *  - Optional `storage`: keeps unsent entries across app restarts.
- *  - `serialize`: the ONLY place that knows the backend's body format. When the
- *    backend contract is final, change this one function.
+ *  - `serialize`: the ONLY place that knows the backend's body format.
  *
  * Only `seq`, `level`, `event`, `timestamp` and `context` are ever sent. The raw
  * `error` object never leaves the device.
@@ -19,6 +24,12 @@
 import type { LogEntry, Transport } from '../types';
 
 export type WireEntry = Pick<LogEntry, 'seq' | 'level' | 'event' | 'timestamp' | 'context'>;
+
+/** What a sender reports back. Use 'NETWORK_ERROR' for offline, DNS, timeout and the like. */
+export type SendResult = { status: number | 'NETWORK_ERROR'; retryAfterMs?: number };
+
+/** Sends one serialized batch. May also throw: that counts as a network error. */
+export type LogSender = (body: unknown) => Promise<SendResult>;
 
 export type HttpResult = { status: number | 'NETWORK_ERROR'; sent: number; retrying: boolean };
 
@@ -29,11 +40,10 @@ export interface QueueStorage {
 }
 
 export type HttpTransportOptions = {
-  url: string;
+  /** How to send a batch. */
+  send: LogSender;
   /** Sent once per batch: app version, platform, OS version, environment, session id. */
   meta: Record<string, string>;
-  /** Your auth header, e.g. the access token. Called before every request. */
-  getHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
   /** Builds the request body. Default: { schemaVersion: 1, meta, entries }. */
   serialize?: (entries: WireEntry[], meta: Record<string, string>) => unknown;
   maxBatch?: number;
@@ -43,7 +53,6 @@ export type HttpTransportOptions = {
   backoffMaxMs?: number;
   storage?: QueueStorage;
   onResult?: (result: HttpResult) => void;
-  fetchImpl?: typeof fetch;
   now?: () => number;
   random?: () => number;
 };
@@ -64,11 +73,13 @@ const defaultSerialize = (entries: WireEntry[], meta: Record<string, string>) =>
   entries,
 });
 
+const isRetryable = (status: SendResult['status']) =>
+  status === 'NETWORK_ERROR' || status === 408 || status === 429 || status >= 500;
+
 export function createHttpTransport(options: HttpTransportOptions): HttpTransport {
   const {
-    url,
+    send,
     meta,
-    getHeaders,
     serialize = defaultSerialize,
     maxBatch = 20,
     maxQueue = 500,
@@ -77,7 +88,6 @@ export function createHttpTransport(options: HttpTransportOptions): HttpTranspor
     backoffMaxMs = 5 * 60_000,
     storage,
     onResult,
-    fetchImpl = (...args) => fetch(...args),
     now = Date.now,
     random = Math.random,
   } = options;
@@ -101,31 +111,25 @@ export function createHttpTransport(options: HttpTransportOptions): HttpTranspor
   async function sendOnce(): Promise<boolean> {
     const batch = queue.splice(0, maxBatch);
     if (batch.length === 0) return false;
+
+    let result: SendResult;
     try {
-      const headers = { 'Content-Type': 'application/json', ...((await getHeaders?.()) ?? {}) };
-      const res = await fetchImpl(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(serialize(batch, meta)),
-      });
-      const retrying = res.status === 408 || res.status === 429 || res.status >= 500;
-      onResult?.({ status: res.status, sent: batch.length, retrying });
-      if (retrying) {
-        queue = [...batch, ...queue];
-        trim();
-        scheduleRetry(retryAfterMs(res));
-        return false;
-      }
-      failures = 0;
-      nextAttemptAt = 0;
-      return true; // 2xx, or 4xx = refused on purpose: either way, don't resend
+      result = await send(serialize(batch, meta));
     } catch {
+      result = { status: 'NETWORK_ERROR' };
+    }
+
+    const retrying = isRetryable(result.status);
+    onResult?.({ status: result.status, sent: batch.length, retrying });
+    if (retrying) {
       queue = [...batch, ...queue];
       trim();
-      scheduleRetry();
-      onResult?.({ status: 'NETWORK_ERROR', sent: batch.length, retrying: true });
+      scheduleRetry(result.retryAfterMs);
       return false;
     }
+    failures = 0;
+    nextAttemptAt = 0;
+    return true; // 2xx, or 4xx = refused on purpose: either way, don't resend
   }
 
   function drain(): Promise<void> {
@@ -179,8 +183,24 @@ export function createHttpTransport(options: HttpTransportOptions): HttpTranspor
   };
 }
 
-function retryAfterMs(res: Response): number | undefined {
-  const value = res.headers?.get?.('Retry-After');
-  const seconds = value ? Number(value) : NaN;
-  return Number.isFinite(seconds) ? seconds * 1000 : undefined;
+/**
+ * Plain-fetch sender, for use until the backend's generated API is available.
+ *
+ *   send: createFetchSender('https://api.example.no/client-logs', async () => ({ Authorization: ... }))
+ */
+export function createFetchSender(
+  url: string,
+  getHeaders?: () => Record<string, string> | Promise<Record<string, string>>,
+  fetchImpl: typeof fetch = (...args) => fetch(...args),
+): LogSender {
+  return async (body) => {
+    try {
+      const headers = { 'Content-Type': 'application/json', ...((await getHeaders?.()) ?? {}) };
+      const res = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(body) });
+      const seconds = Number(res.headers?.get?.('Retry-After'));
+      return { status: res.status, retryAfterMs: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined };
+    } catch {
+      return { status: 'NETWORK_ERROR' };
+    }
+  };
 }

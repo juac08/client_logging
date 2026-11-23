@@ -53,6 +53,13 @@ describe('withLogging', () => {
     expect(entries.map((e) => e.event)).toEqual(['api.request.slow']);
   });
 
+  it('never logs ignored endpoints (the log endpoint itself), so failures cannot loop', async () => {
+    const baseQuery = jest.fn().mockResolvedValue({ error: { status: 503 } });
+    const out = await withLogging(baseQuery, { ignoreEndpoints: ['sendLog'] })('/x', makeApi({ endpoint: 'sendLog' }), {});
+    expect(out).toEqual({ error: { status: 503 } }); // still passed through unchanged
+    expect(entries).toHaveLength(0);
+  });
+
   it('ignores aborted requests', async () => {
     const controller = new AbortController();
     controller.abort();

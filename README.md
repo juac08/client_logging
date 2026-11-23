@@ -18,7 +18,7 @@ with no third-party library. The POCs below explore the options that led to it.
 
 | Folder | Sends to | Highlights |
 |---|---|---|
-| [`frontend-logger/`](frontend-logger/README.md) | Your backend endpoint | **Production version:** event catalog, privacy filter, batching with retry and backoff, throttling, kill switch, 24 tests |
+| [`frontend-logger/`](frontend-logger/README.md) | Your backend endpoint | **Production version:** event catalog, privacy filter, batching with retry and backoff, throttling, kill switch, ready for the generated RTK endpoint, dev/st/pt/pr profiles, 34 tests |
 | [`backend-relay-poc/`](backend-relay-poc/README.md) | **Your own Spring Boot backend**, then your existing logs | No vendor SDK in the app, a server-side allowlist, and your own auth and rate limits. The bank-friendly option. |
 | [`azure-poc/`](azure-poc/README.md) | Azure Application Insights, directly from the app | Runs fully locally with a fake Azure collector. Switch to real Azure by changing the connection string. |
 | [`sentry-poc/`](sentry-poc/README.md) | Sentry (sentry.io) | Stack traces with redacted messages, native crash reports, issue grouping, breadcrumbs |
